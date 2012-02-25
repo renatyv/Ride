@@ -11,8 +11,7 @@
                              TreePath TreeSelectionModel))
   (:use [clooj.utils :only (clooj-prefs read-value-from-prefs
                             write-value-to-prefs awt-event
-                            choose-file)
-         clojure.repl]))
+                            choose-file)]))
 
 ;; projects tree
 

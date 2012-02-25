@@ -6,9 +6,7 @@
                         ListSelectionModel
                         UIManager)
            (javax.swing.event TreeSelectionListener
-                              TreeExpansionListener
-                              DocumentListener
-                              DocumentEvent)
+                              TreeExpansionListener)
            (javax.swing.tree DefaultMutableTreeNode DefaultTreeModel
                              TreePath TreeSelectionModel)
            (java.awt Insets Rectangle Window FlowLayout)
@@ -39,56 +37,32 @@
         (windowClosing [_]
           (System/exit 0))))))
 
-
 (defn create-app []
   (let [frame (JFrame.)
         cp (.getContentPane frame)
         run-result-text (JLabel. "here you will see run results")
-        text-area (make-text-area false)
         layout (FlowLayout.)]
     (doto frame
       (.setBounds 25 50 950 700)
       (.setLayout layout)
-      (.add text-area)
+      (.add (make-text-area false))
       (.add run-result-text)
       (.setTitle (str "Title " "title"))
       (.setVisible true))
-
     (.layoutContainer layout frame)
     (exit-if-closed frame)
     {:frame frame,
      :contentPane cp
      :layout layout
-     :text-area text-area
      :run-result-text run-result-text}))
 
 (def app (create-app))
 
 (def text-set-agent (agent 0))
 
-(defn text-evaluator [state text]
-  (.setText (:run-result-text app)
-            (str (try 
-                   (eval (read-string text))
-                   (catch Throwable t (.getMessage t))))))
+(defn text-setter [state text]
+  (.setText (:run-result-text app) text)
+  (inc state))
 
-(defn create-change-listener []
-  (proxy [DocumentListener] []
-    (insertUpdate [event]
-      (println 
-        (str
-          "insert"
-          (send-off
-            text-set-agent
-            text-evaluator
-            (.getText (:text-area app))))))
-    (removeUpdate [event]
-      (println "remove"))
-    (changedUpdate [event]
-      (println "change"))))
-
-(.. (:text-area app) (getDocument) (addDocumentListener (create-change-listener)))
-
-
-
-
+(defn sset-text [text]
+  (send-off text-set-agent text-setter text))
