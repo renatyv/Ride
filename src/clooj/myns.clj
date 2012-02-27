@@ -64,28 +64,73 @@
 
 (def app (create-app))
 
+(defn read-string-at [source-text start-line]
+     (let [sr (java.io.StringReader. source-text)
+           rdr (proxy [clojure.lang.LineNumberingPushbackReader] [sr]
+                 (getLineNumber []
+                                (+ start-line (proxy-super getLineNumber))))]
+       (take-while #(not= % :EOF_REACHED)
+                   (repeatedly #(try (do
+                                        (hash-map
+                                          (.getLineNumber rdr)
+                                          (read rdr)))
+                                     (catch Exception e :EOF_REACHED))))))
+
+(defn drop-line [text]
+  (drop-while
+    #(not= % \newline)
+    (drop-while
+      #(= % \newline)
+      text)))
+
+(drop-line 
+  (str (println-str "(+ 1 2 3)") (println-str "(* 1 2)")))
+
+(defn map-lines-to-forms [text]
+  (letfn [(map-lines-to-forms-l [text line-number]
+              (if (empty? text)
+                {}
+                (if-let [read-result (try (read-string text)
+                                          (catch Exception e1 false))]
+                        (into 
+                          {line-number read-result}
+                          (map-lines-to-forms-l 
+                                      (drop-line text) (inc line-number)))
+                        (map-lines-to-forms-l 
+                                      (drop-line text) (inc line-number)))))]
+              (map-lines-to-forms-l text 0)))
+
+(map-lines-to-forms 
+  (str (println-str "(+ 1 2 3)") (println-str "(* 1 2)")))
+
 (def text-set-agent (agent 0))
 
 (defn text-evaluator [state text]
   (.setText (:run-result-text app)
-            (str (try 
-                   (eval (read-string text))
-                   (catch Throwable t (.getMessage t))))))
+            (print-str
+              (try
+                (doall (read-string-at text 0))
+                (catch Throwable t (.getMessage t)))
+              "|"
+              (try 
+                (eval (read-string text))
+                (catch Throwable t (.getMessage t))))))
+
+
 
 (defn create-change-listener []
-  (proxy [DocumentListener] []
-    (insertUpdate [event]
-      (println 
-        (str
-          "insert"
-          (send-off
-            text-set-agent
-            text-evaluator
-            (.getText (:text-area app))))))
-    (removeUpdate [event]
-      (println "remove"))
-    (changedUpdate [event]
-      (println "change"))))
+  (letfn [(update [log-text]
+        (println 
+          (str
+            log-text
+            (send-off
+              text-set-agent
+              text-evaluator
+              (.getText (:text-area app))))))]
+    (proxy [DocumentListener] []
+      (insertUpdate [event] (update "insert"))
+      (removeUpdate [event] (update "remove"))
+      (changedUpdate [event] (println "change")))))
 
 (.. (:text-area app) (getDocument) (addDocumentListener (create-change-listener)))
 
