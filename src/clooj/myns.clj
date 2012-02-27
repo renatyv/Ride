@@ -18,7 +18,8 @@
            (java.net URL)
            (java.io File FileReader StringReader
                     BufferedWriter OutputStreamWriter FileOutputStream))
-  (:use [clojure.repl]))
+  (:use [clojure.repl])
+  (:require [clojure.string :as cstr]))
 
 (defn make-text-area [wrap]
   (doto (proxy [JTextPane] []
@@ -43,7 +44,7 @@
 (defn create-app []
   (let [frame (JFrame.)
         cp (.getContentPane frame)
-        run-result-text (JLabel. "here you will see run results")
+        run-result-text (make-text-area false)
         text-area (make-text-area false)
         layout (FlowLayout.)]
     (doto frame
@@ -53,7 +54,6 @@
       (.add run-result-text)
       (.setTitle (str "Title " "title"))
       (.setVisible true))
-
     (.layoutContainer layout frame)
     (exit-if-closed frame)
     {:frame frame,
@@ -64,41 +64,54 @@
 
 (def app (create-app))
 
-(defn read-string-at [source-text start-line]
-     (let [sr (java.io.StringReader. source-text)
-           rdr (proxy [clojure.lang.LineNumberingPushbackReader] [sr]
-                 (getLineNumber []
-                                (+ start-line (proxy-super getLineNumber))))]
-       (take-while #(not= % :EOF_REACHED)
-                   (repeatedly #(try (do
-                                        (hash-map
-                                          (.getLineNumber rdr)
-                                          (read rdr)))
-                                     (catch Exception e :EOF_REACHED))))))
-
 (defn drop-line [text]
-  (drop-while
-    #(not= % \newline)
-    (drop-while
-      #(= % \newline)
-      text)))
+  (apply str
+    (let [[x & xs :as all] (drop-while #(not= \newline %) text)]
+      (if (empty? all)
+        all
+        xs))))
 
-(drop-line 
-  (str (println-str "(+ 1 2 3)") (println-str "(* 1 2)")))
+(defn is-first-line-empty? [text]
+  (let [lines (cstr/split-lines text)]
+    (or 
+      (empty? lines)
+      (cstr/blank? (first lines)))))
 
 (defn map-lines-to-forms [text]
   (letfn [(map-lines-to-forms-l [text line-number]
-              (if (empty? text)
+              (if (cstr/blank? text)
                 {}
-                (if-let [read-result (try (read-string text)
-                                          (catch Exception e1 false))]
-                        (into 
-                          {line-number read-result}
+                (if (is-first-line-empty? text)
+                  (map-lines-to-forms-l (drop-line text) (inc line-number))
+                  (if-let [read-result (try (read-string text)
+                                            (catch Exception e1 false))]
+                          (into 
+                            {line-number read-result}
+                            (map-lines-to-forms-l 
+                                        (drop-line text) (inc line-number)))
                           (map-lines-to-forms-l 
-                                      (drop-line text) (inc line-number)))
-                        (map-lines-to-forms-l 
-                                      (drop-line text) (inc line-number)))))]
+                                        (drop-line text) (inc line-number))))))]
               (map-lines-to-forms-l text 0)))
+
+(defn eval-align-forms [lines-forms-map]
+  (if (empty? lines-forms-map)
+    ""
+    (let[last-line-number (apply max (keys lines-forms-map))]
+      (apply str
+            (map 
+              #(if (get lines-forms-map %)
+                    (str 
+                      (eval (get lines-forms-map %))
+                      \newline)
+                    \newline)
+              (range (inc last-line-number)))))))
+
+(defn gText [] 
+  (.getText (:text-area app)))
+
+(defn eval-text [text]
+  (eval-align-forms 
+    (map-lines-to-forms text)))
 
 (map-lines-to-forms 
   (str (println-str "(+ 1 2 3)") (println-str "(* 1 2)")))
@@ -106,16 +119,12 @@
 (def text-set-agent (agent 0))
 
 (defn text-evaluator [state text]
-  (.setText (:run-result-text app)
-            (print-str
-              (try
-                (doall (read-string-at text 0))
-                (catch Throwable t (.getMessage t)))
-              "|"
-              (try 
-                (eval (read-string text))
-                (catch Throwable t (.getMessage t))))))
-
+  (.setText 
+    (:run-result-text app)
+    (try 
+      (eval-text text)
+      (catch Exception e1 (.toString e1))))
+  (inc state))
 
 
 (defn create-change-listener []
