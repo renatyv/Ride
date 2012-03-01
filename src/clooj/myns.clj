@@ -18,7 +18,8 @@
            (java.net URL)
            (java.io File FileReader StringReader
                     BufferedWriter OutputStreamWriter FileOutputStream))
-  (:use [clojure.repl])
+  (:use [clojure.repl]
+        [clooj.utils])
   (:require [clojure.string :as cstr]))
 
 (defn make-text-area [wrap]
@@ -45,21 +46,24 @@
   (let [frame (JFrame.)
         cp (.getContentPane frame)
         run-result-text (make-text-area false)
-        text-area (make-text-area false)
-        layout (FlowLayout.)]
+        source-text-area (make-text-area false)
+        divider-size 0
+        resize-weight 0.5]
     (doto frame
       (.setBounds 25 50 950 700)
-      (.setLayout layout)
-      (.add text-area)
-      (.add run-result-text)
       (.setTitle (str "Title " "title"))
       (.setVisible true))
-    (.layoutContainer layout frame)
+    (doto cp
+      (.add (make-split-pane 
+        source-text-area 
+        run-result-text 
+        true 
+        divider-size 
+        resize-weight)))
     (exit-if-closed frame)
     {:frame frame,
      :contentPane cp
-     :layout layout
-     :text-area text-area
+     :source-text-area source-text-area
      :run-result-text run-result-text}))
 
 (def app (create-app))
@@ -106,8 +110,8 @@
                     \newline)
               (range (inc last-line-number)))))))
 
-(defn gText [] 
-  (.getText (:text-area app)))
+(defn getSource [] 
+  (.getText (:source-text-area app)))
 
 (defn eval-text [text]
   (eval-align-forms 
@@ -126,7 +130,6 @@
       (catch Exception e1 (.toString e1))))
   (inc state))
 
-
 (defn create-change-listener []
   (letfn [(update [log-text]
         (println 
@@ -135,13 +138,13 @@
             (send-off
               text-set-agent
               text-evaluator
-              (.getText (:text-area app))))))]
+              (.getText (:source-text-area app))))))]
     (proxy [DocumentListener] []
       (insertUpdate [event] (update "insert"))
       (removeUpdate [event] (update "remove"))
       (changedUpdate [event] (println "change")))))
 
-(.. (:text-area app) (getDocument) (addDocumentListener (create-change-listener)))
+(.. (:source-text-area app) (getDocument) (addDocumentListener (create-change-listener)))
 
 
 
