@@ -5,6 +5,10 @@
                         JTextField JTree KeyStroke SpringLayout JTextPane
                         ListSelectionModel
                         UIManager)
+           (java.io BufferedReader BufferedWriter
+                    InputStreamReader
+                    File PipedReader PipedWriter PrintWriter Writer
+                    StringReader PushbackReader)
            (javax.swing.event TreeSelectionListener
                               TreeExpansionListener
                               DocumentListener
@@ -19,8 +23,10 @@
            (java.io File FileReader StringReader
                     BufferedWriter OutputStreamWriter FileOutputStream))
   (:use [clojure.repl]
-        [clooj.utils])
-  (:require [clojure.string :as cstr]))
+        [clooj.utils]
+        [clooj.repl])
+  (:require [clojure.string :as cstr]
+            [clojure.java.io :as io]))
 
 (defn make-text-area [wrap]
   (doto (proxy [JTextPane] []
@@ -68,12 +74,39 @@
 
 (def app (create-app))
 
+(def get-repl-output-writer)
+
+(defn my-outside-repl
+  "This function creates an outside process with a clojure repl."
+  [project-path]
+  (let [java (str (System/getProperty "java.home")
+                  File/separator "bin" File/separator "java")
+        builder (ProcessBuilder.
+                  [java "-cp" (str "lib/*" File/pathSeparatorChar "src") "clojure.main"])]
+    (.redirectErrorStream builder true)
+    (.directory builder (File. (or project-path ".")))
+    (let [proc (.start builder)
+          input-writer  (-> proc .getOutputStream (PrintWriter. true))
+          repl {:input-writer input-writer
+                :project-path project-path
+                :thread nil
+                :proc proc}
+          is (PushbackReader. (.getInputStream proc))]
+      repl)))
+
+(def repl (atom (my-outside-repl ".")))
+
+(defn eval-outside [form]
+  (let [is (io/reader (.getInputStream (:proc @repl)))
+        os (:input-writer @repl)
+        text-to-eval (str form \newline)]
+        (-> os .print text-to-eval)
+        (read is)))
+
 (defn drop-line [text]
   (apply str
     (let [[x & xs :as all] (drop-while #(not= \newline %) text)]
-      (if (empty? all)
-        all
-        xs))))
+      (if (empty? all) '() xs))))
 
 (defn is-first-line-empty? [text]
   (let [lines (cstr/split-lines text)]
@@ -144,8 +177,6 @@
       (removeUpdate [event] (update "remove"))
       (changedUpdate [event] (println "change")))))
 
+
+
 (.. (:source-text-area app) (getDocument) (addDocumentListener (create-change-listener)))
-
-
-
-
