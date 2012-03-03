@@ -20,7 +20,8 @@
                            WindowAdapter KeyAdapter)
            (java.awt AWTEvent Color Font GridLayout Toolkit)
            (java.net URL)
-           (java.io File FileReader StringReader
+           (java.io File FileReader StringReader Reader BufferedReader
+                    PushbackReader InputStreamReader
                     BufferedWriter OutputStreamWriter FileOutputStream))
   (:use [clojure.repl]
         [clooj.utils]
@@ -87,21 +88,43 @@
     (.directory builder (File. (or project-path ".")))
     (let [proc (.start builder)
           input-writer  (-> proc .getOutputStream (PrintWriter. true))
+          input-reader (PushbackReader. (InputStreamReader. (.getInputStream proc)))
           repl {:input-writer input-writer
+                :input-reader input-reader
                 :project-path project-path
                 :thread nil
                 :proc proc}
-          is (PushbackReader. (.getInputStream proc))]
+          ]
       repl)))
 
 (def repl (atom (my-outside-repl ".")))
 
+(defn read-outside []
+  (let [f (future (read (:input-reader @repl)))]
+    (if-let[result (deref f 100 false)]
+      result
+      (do
+        (future-cancel f)
+        nil))))
+
+
+(defn read-rest-from-repl []
+  (if (= "user=>" (str read-outside))
+      '()
+      (recur)))
+
+;read Clojure 1.3.0
+;(read-rest-from-repl)
+
 (defn eval-outside [form]
-  (let [is (io/reader (.getInputStream (:proc @repl)))
-        os (:input-writer @repl)
-        text-to-eval (str form \newline)]
-        (-> os .print text-to-eval)
-        (read is)))
+  (let [text-to-eval (str form)]
+        (do 
+          ; read user=>
+        ;  (read-rest-from-repl)
+          ; push current form
+          (.println (:input-writer @repl) text-to-eval)
+          ;read result
+          (read-outside))))
 
 (defn drop-line [text]
   (apply str
@@ -138,7 +161,7 @@
             (map 
               #(if (get lines-forms-map %)
                     (str 
-                      (eval (get lines-forms-map %))
+                      (eval-outside (get lines-forms-map %))
                       \newline)
                     \newline)
               (range (inc last-line-number)))))))
