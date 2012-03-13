@@ -29,6 +29,38 @@
   (:require [clojure.string :as cstr]
             [clojure.java.io :as io]))
 
+(defn my-outside-repl
+  "This function creates an outside process with a clojure repl."
+  [project-path]
+  (let [java (str (System/getProperty "java.home")
+                  File/separator "bin" File/separator "java")
+        builder (ProcessBuilder.
+                  [java "-cp" "./classes:./lib/clojure-1.3.0.jar" "clooj.myrepl" "randomarg"])]
+    (.redirectErrorStream builder true)
+    (.directory builder (File. (or project-path ".")))
+    (let [proc (.start builder)
+          input-writer  (-> proc .getOutputStream (PrintWriter. true))
+          input-reader (PushbackReader. (InputStreamReader. (.getInputStream proc)))
+          repl {:input-writer input-writer
+                :input-reader input-reader
+                :project-path project-path
+                :thread nil
+                :proc proc}
+          ]
+      repl)))
+
+(def repl (atom (my-outside-repl ".")))
+
+(defn restart-my-repl []
+  (let [oldRepl @repl]
+    (do
+      (println "restart repl")
+      (swap! repl my-outside-repl)
+      (.destroy (:proc oldRepl)))))
+
+(defn stop-repl []
+  (do (.destroy (:proc @repl))))
+
 (defn make-text-area [wrap]
   (doto (proxy [JTextPane] []
           (getScrollableTracksViewportWidth []
@@ -46,6 +78,7 @@
     (.addWindowListener f
       (proxy [WindowAdapter] []
         (windowClosing [_]
+          (stop-repl)
           (System/exit 0))))))
 
 
@@ -75,29 +108,7 @@
 
 (def app (create-app))
 
-(def get-repl-output-writer)
 
-(defn my-outside-repl
-  "This function creates an outside process with a clojure repl."
-  [project-path]
-  (let [java (str (System/getProperty "java.home")
-                  File/separator "bin" File/separator "java")
-        builder (ProcessBuilder.
-                  [java "-cp" (str "lib/*" File/pathSeparatorChar "src") "clojure.main"])]
-    (.redirectErrorStream builder true)
-    (.directory builder (File. (or project-path ".")))
-    (let [proc (.start builder)
-          input-writer  (-> proc .getOutputStream (PrintWriter. true))
-          input-reader (PushbackReader. (InputStreamReader. (.getInputStream proc)))
-          repl {:input-writer input-writer
-                :input-reader input-reader
-                :project-path project-path
-                :thread nil
-                :proc proc}
-          ]
-      repl)))
-
-(def repl (atom (my-outside-repl ".")))
 
 (defn read-outside []
   (let [f (future (read (:input-reader @repl)))]
@@ -105,22 +116,13 @@
       result
       (do
         (future-cancel f)
+        (restart-my-repl)
         nil))))
 
-
-(defn read-rest-from-repl []
-  (if (= "user=>" (str read-outside))
-      '()
-      (recur)))
-
-;read Clojure 1.3.0
-;(read-rest-from-repl)
 
 (defn eval-outside [form]
   (let [text-to-eval (str form)]
         (do 
-          ; read user=>
-        ;  (read-rest-from-repl)
           ; push current form
           (.println (:input-writer @repl) text-to-eval)
           ;read result
@@ -172,9 +174,6 @@
 (defn eval-text [text]
   (eval-align-forms 
     (map-lines-to-forms text)))
-
-(map-lines-to-forms 
-  (str (println-str "(+ 1 2 3)") (println-str "(* 1 2)")))
 
 (def text-set-agent (agent 0))
 
