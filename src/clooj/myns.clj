@@ -27,15 +27,15 @@
         [clooj.utils]
         [clooj.repl])
   (:require [clojure.string :as cstr]
-            [clojure.java.io :as io]))
+            [clojure.java.io :as io]
+            [clojure.stacktrace :as strace]))
 
-(defn my-outside-repl
-  "This function creates an outside process with a clojure repl."
-  [project-path]
+(defn my-outside-repl []
   (let [java (str (System/getProperty "java.home")
                   File/separator "bin" File/separator "java")
+        project-path "."
         builder (ProcessBuilder.
-                  [java "-cp" "./classes:./lib/clojure-1.3.0.jar" "clooj.myrepl" "randomarg"])]
+                  [java "-cp" "./classes:./lib/clojure-1.3.0.jar" "clooj.myrepl"])]
     (.redirectErrorStream builder true)
     (.directory builder (File. (or project-path ".")))
     (let [proc (.start builder)
@@ -49,13 +49,13 @@
           ]
       repl)))
 
-(def repl (atom (my-outside-repl ".")))
+(def repl (atom (my-outside-repl)))
 
 (defn restart-my-repl []
   (let [oldRepl @repl]
     (do
       (println "restart repl")
-      (swap! repl my-outside-repl)
+      (swap! repl (fn [x] (my-outside-repl)))
       (.destroy (:proc oldRepl)))))
 
 (defn stop-repl []
@@ -108,25 +108,28 @@
 
 (def app (create-app))
 
-
-
-(defn read-outside []
+(defn read-from-outside []
   (let [f (future (read (:input-reader @repl)))]
-    (if-let[result (deref f 100 false)]
-      result
-      (do
-        (future-cancel f)
-        (restart-my-repl)
-        nil))))
+    (let[result (deref f 5000 :time-out)]
+      (if-not (= result :time-out)
+        result
+        (do
+          (future-cancel f)
+          (throw (Exception. "read timeout")))))))
 
 
 (defn eval-outside [form]
   (let [text-to-eval (str form)]
+    (try
         (do 
           ; push current form
           (.println (:input-writer @repl) text-to-eval)
           ;read result
-          (read-outside))))
+          (read-from-outside))
+        (catch Exception e1 
+          (do 
+            (restart-my-repl)
+            (.getMessage e1))))))
 
 (defn drop-line [text]
   (apply str
@@ -182,7 +185,10 @@
     (:run-result-text app)
     (try 
       (eval-text text)
-      (catch Exception e1 (.toString e1))))
+      (catch Exception e1 
+        (do 
+          (strace/print-stack-trace e1)
+          (.getMessage e1)))))
   (inc state))
 
 (defn create-change-listener []
