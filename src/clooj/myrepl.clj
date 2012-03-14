@@ -1,9 +1,5 @@
 (ns clooj.myrepl
+  (:require [clojure.main :as clm])
 	(:gen-class))
 
-(defn -main [arg]
-  (println 
-   (try
-     (eval (read))
-     (catch Exception e (str \" (.getMessage e) \"))))
-  (recur arg))
+(defn -main [] (clm/repl :need-prompt (fn [] false) :prompt #(fn [] "")))
