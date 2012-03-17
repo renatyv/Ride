@@ -9,6 +9,7 @@
                     InputStreamReader
                     File PipedReader PipedWriter PrintWriter Writer
                     StringReader PushbackReader)
+           (clojure.lang LineNumberingPushbackReader)
            (javax.swing.event TreeSelectionListener
                               TreeExpansionListener
                               DocumentListener
@@ -24,8 +25,7 @@
                     PushbackReader InputStreamReader
                     BufferedWriter OutputStreamWriter FileOutputStream))
   (:use [clojure.repl]
-        [clooj.utils]
-        [clooj.repl])
+        [clooj.utils])
   (:require [clojure.string :as cstr]
             [clojure.java.io :as io]
             [clojure.stacktrace :as strace]))
@@ -141,6 +141,30 @@
     (or 
       (empty? lines)
       (cstr/blank? (first lines)))))
+
+(defn map-lines-to-forms2 [text]
+  (let [r (LineNumberingPushbackReader.
+              (StringReader. text))]
+    (letfn [(read-next []
+              (let [
+                read-result
+                (do
+                  (try
+                    (read r)
+                    (catch EOFException eof :eof)
+                    (catch Exception e1 (.getMessage e1))))]
+                (if (= read-result :eof) 
+                  (force [(.getLineNumber r) "EOF" true])
+                  (force [(.getLineNumber r) read-result false])))]
+      (loop [[line-number current-result eof-error?] (read-next)
+              resulting-map {}]
+        (if eof-error?
+          resulting-map
+          (recur
+            (read-next)
+            (into 
+              resulting-map
+              (hash-map line-number current-result))))))))
 
 (defn map-lines-to-forms [text]
   (letfn [(map-lines-to-forms-l [text line-number]
