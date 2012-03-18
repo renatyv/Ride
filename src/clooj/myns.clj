@@ -8,7 +8,9 @@
            (java.io BufferedReader BufferedWriter
                     InputStreamReader
                     File PipedReader PipedWriter PrintWriter Writer
-                    StringReader PushbackReader)
+                    StringReader PushbackReader
+                    EOFException)
+           (clojure.lang LispReader$ReaderException)
            (clojure.lang LineNumberingPushbackReader)
            (javax.swing.event TreeSelectionListener
                               TreeExpansionListener
@@ -108,6 +110,7 @@
 
 (def app (create-app))
 
+;TODO support reading multiple forms from output
 (defn read-from-outside []
   (let [f (future (read (:input-reader @repl)))]
     (let[result (deref f 5000 :time-out)]
@@ -119,17 +122,19 @@
 
 
 (defn eval-outside [form]
-  (let [text-to-eval (str form)]
-    (try
-        (do 
-          ; push current form
-          (.println (:input-writer @repl) text-to-eval)
-          ;read result
-          (read-from-outside))
-        (catch Exception e1 
+  (if (string? form) 
+    form
+    (let [text-to-eval (str form)]
+      (try
           (do 
-            (restart-my-repl)
-            (.getMessage e1))))))
+            ; push current form
+            (.println (:input-writer @repl) text-to-eval)
+            ;read result
+            (read-from-outside))
+          (catch Exception e1 
+            (do 
+              (restart-my-repl)
+              (.getMessage e1)))))))
 
 (defn drop-line [text]
   (apply str
@@ -150,12 +155,11 @@
                 read-result
                 (do
                   (try
-                    (read r)
-                    (catch EOFException eof :eof)
+                    (read r false :eof)
                     (catch Exception e1 (.getMessage e1))))]
                 (if (= read-result :eof) 
                   (force [(.getLineNumber r) "EOF" true])
-                  (force [(.getLineNumber r) read-result false])))]
+                  (force [(.getLineNumber r) read-result false]))))]
       (loop [[line-number current-result eof-error?] (read-next)
               resulting-map {}]
         (if eof-error?
