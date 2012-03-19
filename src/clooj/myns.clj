@@ -16,12 +16,14 @@
                               TreeExpansionListener
                               DocumentListener
                               DocumentEvent)
+           (javax.swing JLayeredPane
+                        BorderFactory)
            (javax.swing.tree DefaultMutableTreeNode DefaultTreeModel
                              TreePath TreeSelectionModel)
            (java.awt Insets Rectangle Window FlowLayout)
            (java.awt.event AWTEventListener FocusAdapter MouseAdapter
                            WindowAdapter KeyAdapter)
-           (java.awt AWTEvent Color Font GridLayout Toolkit)
+           (java.awt AWTEvent Color Font GridLayout Toolkit Dimension)
            (java.net URL)
            (java.io File FileReader StringReader Reader BufferedReader
                     PushbackReader InputStreamReader
@@ -83,7 +85,6 @@
           (stop-repl)
           (System/exit 0))))))
 
-
 (defn create-app []
   (let [frame (JFrame.)
         cp (.getContentPane frame)
@@ -95,13 +96,17 @@
       (.setBounds 25 50 950 700)
       (.setTitle (str "Title " "title"))
       (.setVisible true))
+    (doto run-result-text
+      (.setEditable false))
     (doto cp
-      (.add (make-split-pane 
-        source-text-area 
-        run-result-text 
-        true 
-        divider-size 
-        resize-weight)))
+      (.add 
+        (make-split-pane 
+          source-text-area 
+          run-result-text
+          true
+          divider-size
+          resize-weight
+          )))
     (exit-if-closed frame)
     {:frame frame,
      :contentPane cp
@@ -141,13 +146,21 @@
     (let [[x & xs :as all] (drop-while #(not= \newline %) text)]
       (if (empty? all) '() xs))))
 
+(defn drop-lines [text n]
+  (if (zero? n)
+    text
+    (recur (drop-line text) (dec n))))
+
 (defn is-first-line-empty? [text]
   (let [lines (cstr/split-lines text)]
     (or 
       (empty? lines)
       (cstr/blank? (first lines)))))
 
-(defn map-lines-to-forms2 [text]
+(defn forms-end-lines [text]
+  "returns a map
+  key = line number of the end of the form,
+  value = form"
   (let [r (LineNumberingPushbackReader.
               (StringReader. text))]
     (letfn [(read-next []
@@ -158,8 +171,8 @@
                     (read r false :eof)
                     (catch Exception e1 (.getMessage e1))))]
                 (if (= read-result :eof) 
-                  (force [(.getLineNumber r) "EOF" true])
-                  (force [(.getLineNumber r) read-result false]))))]
+                  (doall [(.getLineNumber r) "EOF" true])
+                  (doall [(.getLineNumber r) read-result false]))))]
       (loop [[line-number current-result eof-error?] (read-next)
               resulting-map {}]
         (if eof-error?
@@ -171,20 +184,16 @@
               (hash-map line-number current-result))))))))
 
 (defn map-lines-to-forms [text]
-  (letfn [(map-lines-to-forms-l [text line-number]
-              (if (cstr/blank? text)
-                {}
-                (if (is-first-line-empty? text)
-                  (map-lines-to-forms-l (drop-line text) (inc line-number))
-                  (if-let [read-result (try (read-string text)
-                                            (catch Exception e1 false))]
-                          (into 
-                            {line-number read-result}
-                            (map-lines-to-forms-l 
-                                        (drop-line text) (inc line-number)))
-                          (map-lines-to-forms-l 
-                                        (drop-line text) (inc line-number))))))]
-              (map-lines-to-forms-l text 0)))
+  "returns a map
+  key = starting line of the form
+  value = form"
+  (let [lines (clojure.string/split-lines text)
+        form-ends (forms-end-lines text)]
+    (zipmap
+      (map
+        #(+ (count (take-while clojure.string/blank? (drop % lines))) %)
+        (cons 0 (keys form-ends)))
+      (vals form-ends))))
 
 (defn eval-align-forms [lines-forms-map]
   (if (empty? lines-forms-map)
@@ -199,7 +208,7 @@
                     \newline)
               (range (inc last-line-number)))))))
 
-(defn getSource [] 
+(defn get-source [] 
   (.getText (:source-text-area app)))
 
 (defn eval-text [text]
