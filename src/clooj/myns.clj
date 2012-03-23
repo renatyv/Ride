@@ -1,3 +1,4 @@
+(ns user)
 (ns clooj.myns1
   (:import (javax.swing AbstractListModel BorderFactory JDialog
                         JFrame JLabel JList JMenuBar JOptionPane
@@ -33,6 +34,10 @@
   (:require [clojure.string :as cstr]
             [clojure.java.io :as io]
             [clojure.stacktrace :as strace]))
+
+(defmacro with-ns [ns & bodies]
+  '(binding [*ns* (the-ns ns)]
+     ~@(map (fn [form] `(eval '~form)) body)))
 
 (defn my-outside-repl []
   (let [java (str (System/getProperty "java.home")
@@ -126,20 +131,18 @@
           (throw (Exception. "read timeout")))))))
 
 
+;test this function for continuous repl restarting. Can it handle continious eval errors?
 (defn eval-outside [form]
   (if (string? form) 
     form
-    (let [text-to-eval (str form)]
+    (let [f (future (with-ns 'user form))]
       (try
+        (deref f 5000 "time-out")
+        (catch Exception e1 
           (do 
-            ; push current form
-            (.println (:input-writer @repl) text-to-eval)
-            ;read result
-            (read-from-outside))
-          (catch Exception e1 
-            (do 
-              (restart-my-repl)
-              (.getMessage e1)))))))
+            (future-cancel f)
+            (strace/print-stack-trace e1)
+            (.getMessage e1)))))))
 
 (defn drop-line [text]
   (apply str
@@ -169,7 +172,10 @@
                 (do
                   (try
                     (read r false :eof)
-                    (catch Exception e1 (.getMessage e1))))]
+                    (catch Exception e1 
+                      (do
+                        (strace/print-stack-trace e1)
+                        (.getMessage e1)))))]
                 (if (= read-result :eof) 
                   (doall [(.getLineNumber r) "EOF" true])
                   (doall [(.getLineNumber r) read-result false]))))]
@@ -218,21 +224,25 @@
 (def text-set-agent (agent 0))
 
 (defn text-evaluator [state text]
-  (.setText 
-    (:run-result-text app)
+  (let [eval-result 
     (try 
       (eval-text text)
       (catch Exception e1 
         (do 
           (strace/print-stack-trace e1)
-          (.getMessage e1)))))
-  (inc state))
-
+          (.getMessage e1))))]
+    (awt-event
+      (.setText 
+        (:run-result-text app)
+        eval-result))))
+  
+  
 (defn create-change-listener []
   (letfn [(update [log-text]
         (println 
           (str
             log-text
+            "|"
             (send-off
               text-set-agent
               text-evaluator
