@@ -35,9 +35,11 @@
             [clojure.java.io :as io]
             [clojure.stacktrace :as strace]))
 
-(defmacro with-ns [ns & bodies]
-  '(binding [*ns* (the-ns ns)]
-     ~@(map (fn [form] `(eval '~form)) body)))
+(defmacro with-ns [ns bodies]
+  `(binding [*ns* (the-ns ~ns)]
+     (doall 
+      (list 
+        ~@(map (fn [form] `(eval ~form)) bodies)))))
 
 (defn my-outside-repl []
   (let [java (str (System/getProperty "java.home")
@@ -120,29 +122,31 @@
 
 (def app (create-app))
 
-;TODO support reading multiple forms from output
-(defn read-from-outside []
-  (let [f (future (read (:input-reader @repl)))]
-    (let[result (deref f 5000 :time-out)]
-      (if-not (= result :time-out)
-        result
-        (do
-          (future-cancel f)
-          (throw (Exception. "read timeout")))))))
-
+(defn eval-outside2 [& forms]
+  (binding [*ns* (the-ns 'user)]
+    (doall
+      (map 
+        #(let [f (future (eval %))
+              res (deref f 2000 :time-out)]
+              (when (= res :time-out) 
+                    (future-cancel f))
+              res)
+        forms))))
 
 ;test this function for continuous repl restarting. Can it handle continious eval errors?
-(defn eval-outside [form]
-  (if (string? form) 
-    form
-    (let [f (future (with-ns 'user form))]
-      (try
-        (deref f 5000 "time-out")
-        (catch Exception e1 
-          (do 
-            (future-cancel f)
-            (strace/print-stack-trace e1)
-            (.getMessage e1)))))))
+(defn eval-outside 
+  ([] "")
+  ([& forms]
+    (do
+      (println "debug:" forms)
+      (let [f (future (with-ns 'user (eval forms)))]
+        (try
+          (deref f 5000 "time-out")
+          (catch Exception e1 
+            (do 
+              (future-cancel f)
+              (strace/print-stack-trace e1)
+              (.getMessage e1))))))))
 
 (defn drop-line [text]
   (apply str
@@ -204,15 +208,17 @@
 (defn eval-align-forms [lines-forms-map]
   (if (empty? lines-forms-map)
     ""
-    (let[last-line-number (apply max (keys lines-forms-map))]
+    (let[last-line-number (apply max (keys lines-forms-map))
+          eval-result (apply eval-outside (vals lines-forms-map))
+          evaluated-map (zipmap (keys lines-forms-map) eval-result)]
       (apply str
-            (map 
-              #(if (get lines-forms-map %)
-                    (str 
-                      (eval-outside (get lines-forms-map %))
-                      \newline)
-                    \newline)
-              (range (inc last-line-number)))))))
+        (map 
+          #(if (get lines-forms-map %)
+                (str 
+                  (get evaluated-map %)
+                  \newline)
+                \newline)
+          (range (inc last-line-number)))))))
 
 (defn get-source [] 
   (.getText (:source-text-area app)))
