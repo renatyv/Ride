@@ -35,43 +35,6 @@
             [clojure.java.io :as io]
             [clojure.stacktrace :as strace]))
 
-(defmacro with-ns [ns bodies]
-  `(binding [*ns* (the-ns ~ns)]
-     (doall 
-      (list 
-        ~@(map (fn [form] `(eval ~form)) bodies)))))
-
-(defn my-outside-repl []
-  (let [java (str (System/getProperty "java.home")
-                  File/separator "bin" File/separator "java")
-        project-path "."
-        builder (ProcessBuilder.
-                  [java "-cp" "./classes:./lib/clojure-1.3.0.jar" "clooj.myrepl"])]
-    (.redirectErrorStream builder true)
-    (.directory builder (File. (or project-path ".")))
-    (let [proc (.start builder)
-          input-writer  (-> proc .getOutputStream (PrintWriter. true))
-          input-reader (PushbackReader. (InputStreamReader. (.getInputStream proc)))
-          repl {:input-writer input-writer
-                :input-reader input-reader
-                :project-path project-path
-                :thread nil
-                :proc proc}
-          ]
-      repl)))
-
-(def repl (atom (my-outside-repl)))
-
-(defn restart-my-repl []
-  (let [oldRepl @repl]
-    (do
-      (println "restart repl")
-      (swap! repl (fn [x] (my-outside-repl)))
-      (.destroy (:proc oldRepl)))))
-
-(defn stop-repl []
-  (do (.destroy (:proc @repl))))
-
 (defn make-text-area [wrap]
   (doto (proxy [JTextPane] []
           (getScrollableTracksViewportWidth []
@@ -89,7 +52,6 @@
     (.addWindowListener f
       (proxy [WindowAdapter] []
         (windowClosing [_]
-          (stop-repl)
           (System/exit 0))))))
 
 (defn create-app []
@@ -122,7 +84,7 @@
 
 (def app (create-app))
 
-(defn eval-outside2 [& forms]
+(defn eval-outside [& forms]
   (binding [*ns* (the-ns 'user)]
     (doall
       (map 
@@ -132,21 +94,6 @@
                     (future-cancel f))
               res)
         forms))))
-
-;test this function for continuous repl restarting. Can it handle continious eval errors?
-(defn eval-outside 
-  ([] "")
-  ([& forms]
-    (do
-      (println "debug:" forms)
-      (let [f (future (with-ns 'user (eval forms)))]
-        (try
-          (deref f 5000 "time-out")
-          (catch Exception e1 
-            (do 
-              (future-cancel f)
-              (strace/print-stack-trace e1)
-              (.getMessage e1))))))))
 
 (defn drop-line [text]
   (apply str
@@ -177,9 +124,7 @@
                   (try
                     (read r false :eof)
                     (catch Exception e1 
-                      (do
-                        (strace/print-stack-trace e1)
-                        (.getMessage e1)))))]
+                      (do (.getMessage e1)))))]
                 (if (= read-result :eof) 
                   (doall [(.getLineNumber r) "EOF" true])
                   (doall [(.getLineNumber r) read-result false]))))]
